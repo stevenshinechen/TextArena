@@ -10,6 +10,8 @@ from collections import defaultdict
 MIN_PLAYERS = 6
 MAX_PLAYERS = 15
 
+# TODO: randomize discussion order?
+
 WEREWOLF_RULES = """
 You are playing Werewolf, a hidden-role social deduction game.
 WEREWOLF GAME RULES
@@ -300,7 +302,7 @@ def init_game_state(num_players: int, player_roles: Dict[int, str], werewolf_rat
     role_pids = defaultdict(list)
     for pid, role in player_roles.items():
         role_pids[role].append(pid)
-    
+
     return GameState(
         num_players=num_players,
         phase=INITIAL_PHASE,
@@ -318,15 +320,21 @@ def init_game_state(num_players: int, player_roles: Dict[int, str], werewolf_rat
         day_votes={},
     )
 
-def count_alive_roles(game_state: GameState) -> tuple[int, int]:
-    """Count alive werewolves and good players from current alive players."""
+
+def alive_roles(game_state: GameState) -> tuple[list[int], list[int]]:
+    """Returns the alive werewolf and good players"""
     alive_players = game_state["alive_player_ids"]
     player_roles = game_state["player_roles"]
-    
-    alive_werewolves = sum(1 for pid in alive_players if player_roles.get(pid) == WEREWOLF_NAME)
-    alive_good = len(alive_players) - alive_werewolves
-    
+
+    alive_werewolves = [
+        pid for pid in alive_players if player_roles.get(pid) == WEREWOLF_NAME
+    ]
+    alive_good = [
+        pid for pid in alive_players if player_roles.get(pid) != WEREWOLF_NAME
+    ]
+
     return alive_werewolves, alive_good
+
 
 class WerewolfEnv(ta.Env):
     def __init__(self, werewolf_ratio: float = 0.33):
@@ -730,7 +738,7 @@ class WerewolfEnv(ta.Env):
         self._check_win()
 
     def _check_win(self):
-        werewolves, good_players = count_alive_roles(self.state.game_state)
+        werewolves, good_players = alive_roles(self.state.game_state)
         if not werewolves:
             self.state.set_winners(player_ids=good_players, reason="All Werewolves were eliminated. Good players win!")
         elif len(werewolves) >= len(good_players):
