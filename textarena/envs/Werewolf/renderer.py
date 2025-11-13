@@ -7,10 +7,13 @@ def render_players_list(player_roles: dict, alive_players: list, show_roles: boo
     return "\n".join(lines)
 
 
-def render_alive_dead_lists(player_roles: dict, alive_players: list, eliminated_players: list) -> str:
+def render_alive_dead_lists(game_state: dict) -> str:
     """Render separate lists of alive and dead players for public view."""
+    alive_players = game_state.get("alive_player_ids", [])
+    n_players = game_state.get("num_players", 0)
+
     alive_sorted = sorted(alive_players)
-    dead_sorted = sorted(eliminated_players or [])
+    dead_sorted = sorted([pid for pid in range(n_players) if pid not in alive_players])
 
     lines = []
     lines.append("👥 Players:")
@@ -146,35 +149,29 @@ def render_game_state(
     viewer_is_seer: bool = False,
 ) -> str:
     """Main Werewolf board renderer."""
-    phase = str(game_state.get("phase", "Unknown"))
-    num_players = game_state.get("num_players", 0)
-    player_roles = game_state.get("player_roles", {})
-    alive_players = game_state.get("alive_player_ids", [])
-    eliminated_players = game_state.get("eliminated_player_ids", [])
-    
     lines = [
         f"🐺 WEREWOLF GAME STATUS",
         "",
     ]
-    
+
     # Core game info
     lines.append(render_phase_info(game_state))
     lines.append("")
-    
+
     # Game progress
     lines.append(render_game_progress(game_state))
     lines.append("")
-    
+
     # Always show alive/dead lists
-    lines.append(render_alive_dead_lists(player_roles, alive_players, eliminated_players))
+    lines.append(render_alive_dead_lists(game_state))
     lines.append("")
-    
+
     # Phase-specific actions
     night_actions = render_night_actions(game_state, viewer_is_witch=viewer_is_witch)
     if night_actions:
         lines.append(night_actions)
         lines.append("")
-    
+
     day_actions = render_day_actions(game_state)
     if day_actions:
         lines.append(day_actions)
@@ -189,5 +186,5 @@ def render_game_state(
         if lines and lines[-1] != "":
             lines.append("")
         lines.append(render_seer_info(game_state))
-    
+
     return "\n".join(lines)
