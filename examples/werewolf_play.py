@@ -20,9 +20,7 @@ env.reset(num_players=len(agents))
 done = False 
 while not done:
   player_id, observation = env.get_observation()
-  print(f"\n--- Player {player_id} Observation ---\n{observation}\n")
   action = agents[player_id](observation)
-  print(f"--- Player {player_id} Action ---\n{action}\n")
   done, step_info = env.step(action=action)
 rewards, game_info = env.close()
 
