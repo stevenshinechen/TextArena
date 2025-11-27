@@ -200,13 +200,13 @@ class Seer(Role):
 class Witch(Role):
     def get_prompt(self, player_id: int, game_state: Dict) -> str:
         base = self.base_prompt(player_id, game_state)
-
+        
         if game_state.get("attacked_player_id") is not None:
             attacked_player = game_state["attacked_player_id"]
             attacked_info = f"Player {attacked_player} was attacked by the Werewolves this night.\n"
         else:
             attacked_info = "No one was attacked by the Werewolves this night.\n"
-
+        
         return base + (
             f"{attacked_info}"
             f"You have {game_state['num_cures']} Cure potion(s) and {game_state['num_poisons']} Poison potion(s). "
