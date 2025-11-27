@@ -408,8 +408,8 @@ class WerewolfEnv(ta.Env):
         # Send message from current werewolf to all other werewolves
         alive_werewolves = [p for p in self.state.game_state["alive_player_ids"] if self.player_roles[p] == WEREWOLF_NAME]
         for other_werewolf in alive_werewolves:
-            if other_werewolf != pid:  # Don't send to self
-                self.state.add_observation(from_id=pid, to_id=other_werewolf, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
+            # Also send to self for future prompt context
+            self.state.add_observation(from_id=pid, to_id=other_werewolf, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
     def _handle_werewolf_vote(self, pid: int, action: str):
         target = WerewolfParser.parse_kill(action)
@@ -472,6 +472,9 @@ class WerewolfEnv(ta.Env):
             self.state.game_state["num_poisons"] -= 1
             self.state.game_state["poisoned_player_id"] = target
 
+        # The witch should know their own actions for future reference
+        self.state.add_observation(from_id=pid, to_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
+
     def _handle_day_discussion(self, pid: int, action: str):
         self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
 
@@ -486,6 +489,7 @@ class WerewolfEnv(ta.Env):
                 self.state.made_invalid_move = False  # such that we can rotate off the player 
                 return
         self.state.game_state["day_votes"][pid] = target
+        # TODO perhaps the voting should be visible to all players?
 
     def _after_player_action(self):
         if self.state.made_invalid_move: return
