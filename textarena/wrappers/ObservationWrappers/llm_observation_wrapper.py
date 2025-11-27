@@ -43,50 +43,12 @@ class LLMObservationWrapper(ObservationWrapper):
         return self._convert_obs_to_str(player_id=player_id)
 
 
-class WerewolfObservationWrapper(ObservationWrapper):
+class WerewolfObservationWrapper(LLMObservationWrapper):
     """
     A wrapper for the Werewolf game that manages game board observations.
     It maintains a single game board state per player, updating it with new messages.
-    When generating the observation string, the game board is inserted second to last,
-    ensuring the final message (usually action instructions) remains at the end.
+    It is located in the second position of the observation list.
     """
-
-    def __init__(self, env: Env):
-        super().__init__(env)
-        self.full_observations: Dict[int, List[Tuple[int, str, ObservationType]]] = {}
-        self.latest_game_board: Dict[int, Tuple[int, str, ObservationType]] = {}
-
-    def _convert_obs_to_str(self, player_id: int) -> str:
-        str_observation = ""
-
-        history = self.full_observations.get(player_id, [])
-        game_board = self.latest_game_board.get(player_id)
-
-        # construct the list of messages to display
-        messages_to_display = []
-        if game_board:
-            if not history:
-                messages_to_display = [game_board]
-            else:
-                # insert game board second to last
-                messages_to_display = history[:-1] + [game_board] + history[-1:]
-        else:
-            messages_to_display = history
-
-        # format the messages
-        for sender_id, message, _ in messages_to_display:
-            if sender_id == ta.GAME_ID:
-                sender_name = "GAME"
-            else:
-                # use role mapping if available, otherwise default to Player ID
-                sender_name = self.env.state.role_mapping.get(
-                    sender_id, f"Player {sender_id}"
-                )
-
-            str_observation += f"\n[{sender_name}] {message}"
-
-        return str_observation
-
     def observation(
         self,
         player_id: int,
@@ -97,8 +59,32 @@ class WerewolfObservationWrapper(ObservationWrapper):
                 self.full_observations[player_id] = []
 
             for sender_id, message, obs_type in observation:
+
+                # Insert the latest game board right after the game description prompt
                 if obs_type == ObservationType.GAME_BOARD:
-                    self.latest_game_board[player_id] = (sender_id, message, obs_type)
+                    if len(self.full_observations[player_id]) >= 2:
+
+                        # Update existing game board observation
+                        if self.full_observations[player_id][1][2] == ObservationType.GAME_BOARD:
+                            self.full_observations[player_id][1] = (
+                                sender_id,
+                                message,
+                                obs_type,
+                            )
+                        # Add the game board observation if not present
+                        else:
+                            self.full_observations[player_id].insert(
+                                1, (sender_id, message, obs_type)
+                            )
+
+                    elif len(self.full_observations[player_id]) == 1:
+                        self.full_observations[player_id].append(
+                            (sender_id, message, obs_type)
+                        )
+                    else:
+                        raise ValueError(
+                            "GAME_BOARD observation received but no initial prompt found."
+                        )
                 else:
                     self.full_observations[player_id].append(
                         (sender_id, message, obs_type)
