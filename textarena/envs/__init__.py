@@ -1,5 +1,6 @@
 """ Register all game environments """ 
 
+from functools import partial
 from textarena.envs.registration import register, register_with_versions
 from textarena.envs.utils.jury import OpenRouterJury
 from textarena.wrappers import LLMObservationWrapper, ActionFormattingWrapper, GameMessagesAndCurrentBoardObservationWrapper, GameMessagesObservationWrapper, GameBoardObservationWrapper, ClipCharactersActionWrapper, SettlersOfCatanObservationWrapper, WerewolfObservationWrapper
@@ -8,7 +9,7 @@ from textarena.wrappers import LLMObservationWrapper, ActionFormattingWrapper, G
 DEFAULT_WRAPPERS = [LLMObservationWrapper, ActionFormattingWrapper]
 BOARDGAME_WRAPPERS = [GameMessagesAndCurrentBoardObservationWrapper, ActionFormattingWrapper]
 CONVERSATIONAL_WRAPPERS = [LLMObservationWrapper, ClipCharactersActionWrapper]
-WEREWOLF_WRAPPERS = [WerewolfObservationWrapper, ClipCharactersActionWrapper]
+WEREWOLF_WRAPPERS = [WerewolfObservationWrapper, partial(ClipCharactersActionWrapper, max_num_characters=5000)]
 
 
 # 2048 [1 Player]
