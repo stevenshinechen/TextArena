@@ -9,7 +9,6 @@ from collections import defaultdict
 
 MIN_PLAYERS = 6
 MAX_PLAYERS = 15
-
 # TODO: randomize discussion order?
 
 WEREWOLF_RULES = """
@@ -213,7 +212,7 @@ class Witch(Role):
             f"You have {game_state['num_cures']} Cure potion(s) and {game_state['num_poisons']} Poison potion(s). "
             f"You can use a Cure potion to save a player or use a Poison potion to kill a player."
         )
-
+    
 class WerewolfParser:
     # Witch cure pattern: <cure></cure>
     cure_pattern = re.compile(r"<cure>\s*</cure>", re.IGNORECASE)
@@ -302,7 +301,7 @@ def init_game_state(num_players: int, player_roles: Dict[int, str], werewolf_rat
     role_pids = defaultdict(list)
     for pid, role in player_roles.items():
         role_pids[role].append(pid)
-
+    
     return GameState(
         num_players=num_players,
         phase=INITIAL_PHASE,
@@ -320,7 +319,6 @@ def init_game_state(num_players: int, player_roles: Dict[int, str], werewolf_rat
         day_votes={},
     )
 
-
 def alive_roles(game_state: GameState) -> tuple[list[int], list[int]]:
     """Returns the alive werewolf and good players"""
     alive_players = game_state["alive_player_ids"]
@@ -334,7 +332,6 @@ def alive_roles(game_state: GameState) -> tuple[list[int], list[int]]:
     ]
 
     return alive_werewolves, alive_good
-
 
 class WerewolfEnv(ta.Env):
     def __init__(self, werewolf_ratio: float = 0.33):
@@ -351,12 +348,12 @@ class WerewolfEnv(ta.Env):
 
         self._send_phase_prompts() # populate self.next_player_ids
         self.state.manually_set_current_player_id(self.next_player_ids.pop())
-
+    
     def _render_game_state(self):
         game_state = self.state.game_state
         role_pids = self.state.game_state.get("role_pids", {})
         alive_ids = set(self.state.game_state.get("alive_player_ids", []))
-
+        
         # Send role-specific boards to special roles
         witch_ids = role_pids.get(WITCH_NAME, [])
         for witch_pid in witch_ids:
@@ -369,7 +366,7 @@ class WerewolfEnv(ta.Env):
             if seer_pid in alive_ids:
                 seer_board = render_game_state(game_state, viewer_is_seer=True)
                 self.state.add_observation(to_id=seer_pid, message=seer_board, observation_type=ta.ObservationType.GAME_BOARD)
-
+        
         # Send public board to all other players (Villagers, Werewolves, and any other roles)
         public_board = render_game_state(game_state)
         for player_id in alive_ids:
@@ -451,7 +448,7 @@ class WerewolfEnv(ta.Env):
             else: # player was eliminated by invalid move
                 self.state.made_invalid_move = False  # such that we can rotate off the player 
                 return
-
+    
         if action_type == "cure":
             if self.state.game_state["num_cures"] <= 0:
                 fatal = self.state.set_invalid_move("You have no more Cure potions left.")
@@ -526,7 +523,7 @@ class WerewolfEnv(ta.Env):
             if self.next_player_ids:
                 break
         self.state.manually_set_current_player_id(self.next_player_ids.pop())
-
+    
     def _resolve_seer_reveal(self):
         revealed_players = self.state.game_state["revealed_player_ids"]
         if revealed_players:
@@ -543,17 +540,17 @@ class WerewolfEnv(ta.Env):
         # Count votes from werewolves only
         target_vote_counts = defaultdict(int)
         alive_werewolves = []
-
+        
         # Get all alive werewolves
         for pid in self.state.game_state["alive_player_ids"]:
             if self.player_roles[pid] == WEREWOLF_NAME:
                 alive_werewolves.append(pid)
-
+        
         # Count votes from alive werewolves only
         for voter_id, target_id in self.state.game_state["werewolf_votes"].items():
             if voter_id in alive_werewolves and target_id in self.state.game_state["alive_player_ids"]:
                 target_vote_counts[target_id] += 1
-
+        
         # Check for unanimous consensus among alive werewolves
         if target_vote_counts and len(alive_werewolves) > 0:
             max_votes = max(target_vote_counts.values())
@@ -586,19 +583,19 @@ class WerewolfEnv(ta.Env):
         vote_counts = defaultdict(int)
         for pid, target in self.state.game_state["day_votes"].items():
             vote_counts[target] += 1
-
+        
         if vote_counts:
             # Find the player with the most votes, with random tie-breaker
             max_votes = max(vote_counts.values())
             candidates = [p for p, v in vote_counts.items() if v == max_votes]
             eliminated_player = random.choice(candidates)
             self.state.game_state["voted_player_id"] = eliminated_player
-
+            
             # Eliminate the player
             self._eliminate_player(eliminated_player, "was eliminated by village vote")
         else:
             self.state.game_state["voted_player_id"] = None
-
+        
     def _reset_round_state(self):
         self.state.game_state["voted_player_id"] = None
         self.state.game_state["attacked_player_id"] = None
@@ -630,27 +627,21 @@ class WerewolfEnv(ta.Env):
             # Werewolf discussion
             case Phase.WEREWOLF_DISCUSSION:
                 message = (
-                    "Night: Werewolf discussion.\n"
-                    + "Private communication among Werewolves is allowed.\n"
-                    + "No actions in this phase."
+                    "Night: Werewolf discussion.\n" +
+                    "Private communication among Werewolves is allowed.\n" +
+                    "No actions in this phase."
                 )
-                werewolf_ids = [
-                    pid for pid in player_ids if self.player_roles[pid] == WEREWOLF_NAME
-                ]
+                werewolf_ids = [pid for pid in player_ids if self.player_roles[pid] == WEREWOLF_NAME]
                 for pid in werewolf_ids:
-                    self.state.add_observation(
-                        to_id=pid,
-                        message=message,
-                        observation_type=ta.ObservationType.GAME_MESSAGE,
-                    )
+                    self.state.add_observation(to_id=pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
                 self.next_player_ids = werewolf_ids
 
             # Werewolf vote
             case Phase.WEREWOLF_VOTE:
                 message = (
-                    "Night action: Werewolves must now choose one living player to eliminate.\n"
-                    + "Reply only with your choice in this exact format: <kill>player_id</kill>\n"
-                    + "Example: <kill>3</kill>"
+                    "Night action: Werewolves must now choose one living player to eliminate.\n" +
+                    "Reply only with your choice in this exact format: <kill>player_id</kill>\n" +
+                    "Example: <kill>3</kill>"
                 )
                 werewolf_ids = [pid for pid in player_ids if self.player_roles[pid] == WEREWOLF_NAME]
                 for pid in werewolf_ids:
@@ -681,7 +672,7 @@ class WerewolfEnv(ta.Env):
                 if alive_witches:
                     num_cures = gs.get("num_cures", 0)
                     num_poisons = gs.get("num_poisons", 0)
-
+                    
                     # Build dynamic message based on available potions
                     actions = []
                     if num_cures > 0:
@@ -689,10 +680,10 @@ class WerewolfEnv(ta.Env):
                     if num_poisons > 0:
                         actions.append("- Poison someone: <poison>player_id</poison>")
                     actions.append("- Do nothing: <no_action></no_action>")
-
+                    
                     actions_text = "\n".join(actions)
                     example = f"Example: <poison>4</poison>" if num_poisons > 0 else ""
-
+                    
                     for witch_pid in alive_witches:
                         message = (
                             f"Night action: You are the Witch.\n" +

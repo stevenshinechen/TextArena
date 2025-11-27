@@ -153,25 +153,25 @@ def render_game_state(
         f"🐺 WEREWOLF GAME STATUS",
         "",
     ]
-
+    
     # Core game info
     lines.append(render_phase_info(game_state))
     lines.append("")
-
+    
     # Game progress
     lines.append(render_game_progress(game_state))
     lines.append("")
-
+    
     # Always show alive/dead lists
     lines.append(render_alive_dead_lists(game_state))
     lines.append("")
-
+    
     # Phase-specific actions
     night_actions = render_night_actions(game_state, viewer_is_witch=viewer_is_witch)
     if night_actions:
         lines.append(night_actions)
         lines.append("")
-
+    
     day_actions = render_day_actions(game_state)
     if day_actions:
         lines.append(day_actions)
@@ -186,5 +186,5 @@ def render_game_state(
         if lines and lines[-1] != "":
             lines.append("")
         lines.append(render_seer_info(game_state))
-
+    
     return "\n".join(lines)
