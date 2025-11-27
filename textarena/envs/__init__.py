@@ -2,12 +2,13 @@
 
 from textarena.envs.registration import register, register_with_versions
 from textarena.envs.utils.jury import OpenRouterJury
-from textarena.wrappers import LLMObservationWrapper, ActionFormattingWrapper, GameMessagesAndCurrentBoardObservationWrapper, GameMessagesObservationWrapper, GameBoardObservationWrapper, ClipCharactersActionWrapper, SettlersOfCatanObservationWrapper
+from textarena.wrappers import LLMObservationWrapper, ActionFormattingWrapper, GameMessagesAndCurrentBoardObservationWrapper, GameMessagesObservationWrapper, GameBoardObservationWrapper, ClipCharactersActionWrapper, SettlersOfCatanObservationWrapper, WerewolfObservationWrapper
 
 # standard wrapper combinations
 DEFAULT_WRAPPERS = [LLMObservationWrapper, ActionFormattingWrapper]
 BOARDGAME_WRAPPERS = [GameMessagesAndCurrentBoardObservationWrapper, ActionFormattingWrapper]
 CONVERSATIONAL_WRAPPERS = [LLMObservationWrapper, ClipCharactersActionWrapper]
+WEREWOLF_WRAPPERS = [WerewolfObservationWrapper, ClipCharactersActionWrapper]
 
 
 # 2048 [1 Player]
@@ -485,7 +486,7 @@ register_with_versions(id="SecretMafia-v0", entry_point="textarena.envs.SecretMa
 register_with_versions(id="Avalon-v0", entry_point="textarena.envs.Avalon.env:AvalonEnv", wrappers={"default": CONVERSATIONAL_WRAPPERS, "-train": CONVERSATIONAL_WRAPPERS}, discussion_rounds=1)
 
 
-register_with_versions(id="Werewolf-v0", entry_point="textarena.envs.Werewolf.env:WerewolfEnv", wrappers={"default": CONVERSATIONAL_WRAPPERS, "-train": CONVERSATIONAL_WRAPPERS}, werewolf_ratio=0.33)
+register_with_versions(id="Werewolf-v0", entry_point="textarena.envs.Werewolf.env:WerewolfEnv", wrappers={"default": WEREWOLF_WRAPPERS, "-train": WEREWOLF_WRAPPERS}, werewolf_ratio=0.33)
 
 
 
