@@ -1,5 +1,6 @@
 import asyncio
 from abc import ABC, abstractmethod
+import json
 import os, time
 from typing import Optional, Tuple
 import random
@@ -107,129 +108,82 @@ class OpenRouterAgent(Agent):
 
 
 class RandomWerewolfAgent(Agent):
-    """Werewolf agent that selects actions randomly from valid options."""
+    """Werewolf agent that selects actions randomly from valid options.
+    
+    This agent uses the JSON game state to make decisions. The environment must
+    be configured to render game state in JSON format (RenderStateFormat.JSON).
+    """
 
     def __init__(self):
         super().__init__()
-        self._werewolf_vote_message = (
-            "Night action: Werewolves must now choose one living player to eliminate.\n"
-            "Reply only with your choice in this exact format: <kill>player_id</kill>\n"
-            "Example: <kill>3</kill>"
-        )
-        self._seer_message = (
-            "Night action: You are the Seer.\n"
-            "Choose one living player to reveal their true role.\n"
-            "Reply only with your choice: <reveal>player_id</reveal>\n"
-            "Example: <reveal>2</reveal>"
-        )
-        self._witch_base_message = (
-            "Night action: You are the Witch.\n"
-            "You know who was attacked. Choose one action:\n"
-        )
-        self._day_vote_message = (
-            "Voting time. Choose one player to eliminate.\n"
-            "Reply only with your vote in this format: <vote>player_id</vote>\n"
-            "Example: <vote>5</vote>"
-        )
-        self._day_discussion_message = (
-            "Day discussion.\n"
-            "All living players may speak publicly.\n"
-            "Do not vote or use action tags in this phase."
-        )
-        self._werewolf_discussion_message = (
-            "Night: Werewolf discussion.\n"
-            "Private communication among Werewolves is allowed.\n"
-            "No actions in this phase."
-        )
-        self._phase_messages = {
-            "werewolf_vote": self._werewolf_vote_message,
-            "seer": self._seer_message,
-            "witch": self._witch_base_message,
-            "day_vote": self._day_vote_message,
-            "day_discussion": self._day_discussion_message,
-            "werewolf_discussion": self._werewolf_discussion_message
-        }
-        
-    def _get_phase(self, observation: str) -> str:
-        """Find last occurrence of any phase message template."""
-        last_phase = None
-        last_index = -1
-        for phase, message in self._phase_messages.items():
-            index = observation.rfind(message)
-            if index > last_index:
-                last_index = index
-                last_phase = phase
-        return last_phase
+        self._curr_game_state = {}
 
-    def _get_werewolves(self, observation: str) -> list[int]:
-        """Extract werewolf player IDs from observation."""
-        pattern = re.compile(r"Player (\d+): Werewolf")
-        return [int(match.group(1)) for match in pattern.finditer(observation)]
+    def _get_game_state(self, observation: str) -> dict:
+        """Extract the latest game state JSON from observation."""
+        pattern = re.compile(r"<gamestate>(\{.*?\})</gamestate>", re.DOTALL)
+        match = pattern.search(observation)
 
-    def _get_alive_players(self, observation: str) -> list[int]:
-        """Extract alive player IDs from the most recent game state."""
-        pattern = re.compile(
-            r"👥 Players:\s*\n\s*🟢 Alive:\s*\n((?:\s*•\s*Player\s+(\d+)\s*\n)*)",
-            re.MULTILINE
+        assert match is not None, (
+            "Game state not found in observation. "
+            "Make sure the environment is set to render game state in JSON format."
         )
-        matches = list(pattern.finditer(observation))
-        
-        if not matches:
-            return []
-        
-        last_match = matches[-1]
-        alive_section = last_match.group(1)
-        
-        player_pattern = re.compile(r"Player\s+(\d+)")
-        return [int(match.group(1)) for match in player_pattern.finditer(alive_section)]
-    
-    def _get_self_id(self, observation: str) -> Optional[int]:
+        game_state_json = match.group(1)
+        try:
+            return json.loads(game_state_json)
+        except json.JSONDecodeError:
+            raise ValueError("Failed to decode game state JSON from observation.")
+
+    def _get_self_id(self, observation: str) -> int:
         """Extract the agent's own player ID from observation."""
-        pattern = re.compile(r"You are Player (\d+).")
+        pattern = re.compile(r"You are Player (\d+)\.")
         match = pattern.search(observation)
         if match:
             return int(match.group(1))
         raise ValueError("Agent's own player ID not found in observation.")
-    
-    def _get_witch_options(self, observation: str) -> list[str]:
-        """Extract available witch action options from observation."""
-        save_pattern = "- Save them: <cure></cure>"
-        poison_pattern = "- Poison someone: <poison>player_id</poison>"
+
+    def _get_witch_options(self) -> list[str]:
+        """Get available witch action options from game state."""
         options = ["no_action"]
         
-        if save_pattern in observation:
+        num_cures = self._curr_game_state["num_cures"]
+        num_poisons = self._curr_game_state["num_poisons"]
+        
+        if num_cures > 0:
             options.append("heal")
-        if poison_pattern in observation:
+        if num_poisons > 0:
             options.append("poison")
         
         return options
 
     def _handle_werewolf_vote(self, observation: str) -> str:
         """Choose a random non-werewolf player to eliminate."""
-        werewolves = self._get_werewolves(observation)
-        alive_players = self._get_alive_players(observation)
+        werewolf_ids = self._curr_game_state["werewolf_ids"]
+        alive_player_ids = self._curr_game_state["alive_player_ids"]
         self_id = self._get_self_id(observation)
-        possible_targets = [p for p in alive_players if p not in werewolves and p != self_id]
         
+        possible_targets = [p for p in alive_player_ids if p not in werewolf_ids and p != self_id]
+
         if possible_targets:
             target = random.choice(possible_targets)
             return f"<kill>{target}</kill>"
         return ""
 
     def _handle_seer(self, observation: str) -> str:
-        """Choose a random player to reveal."""
-        alive_players = self._get_alive_players(observation)
+        """Choose a random player to reveal (it can't use this information anyway)."""
+        alive_player_ids = self._curr_game_state["alive_player_ids"]
         self_id = self._get_self_id(observation)
-        possible_targets = [p for p in alive_players if p != self_id]
+        
+        possible_targets = [p for p in alive_player_ids if p != self_id]
         target = random.choice(possible_targets)
         return f"<reveal>{target}</reveal>"
 
     def _handle_witch(self, observation: str) -> str:
         """Choose a random witch action from available options."""
-        alive_players = self._get_alive_players(observation)
+        alive_player_ids = self._curr_game_state["alive_player_ids"]
         self_id = self._get_self_id(observation)
-        possible_targets = [p for p in alive_players if p != self_id]
-        possible_options = self._get_witch_options(observation)
+        
+        possible_targets = [p for p in alive_player_ids if p != self_id]
+        possible_options = self._get_witch_options()
 
         choice = random.choice(possible_options)
         
@@ -245,23 +199,25 @@ class RandomWerewolfAgent(Agent):
 
     def _handle_day_vote(self, observation: str) -> str:
         """Choose a random player to vote for elimination."""
-        alive_players = self._get_alive_players(observation)
+        alive_player_ids = self._curr_game_state["alive_player_ids"]
         self_id = self._get_self_id(observation)
-        possible_targets = [p for p in alive_players if p != self_id]
+
+        possible_targets = [p for p in alive_player_ids if p != self_id]
         return f"<vote>{random.choice(possible_targets)}</vote>"
 
     def __call__(self, observation: str) -> str:
         """Process observation and return appropriate action based on phase."""
-        phase = self._get_phase(observation)
-        
+        self._curr_game_state = self._get_game_state(observation)
+        phase = self._curr_game_state["phase"]
+
         match phase:
-            case "werewolf_vote":
+            case "Phase.WEREWOLF_VOTE":
                 return self._handle_werewolf_vote(observation)
-            case "seer":
+            case "Phase.SEER_REVEAL":
                 return self._handle_seer(observation)
-            case "witch":
+            case "Phase.WITCH_CHOICE":
                 return self._handle_witch(observation)
-            case "day_vote":
+            case "Phase.DAY_VOTE":
                 return self._handle_day_vote(observation)
             case _:
                 return ""
