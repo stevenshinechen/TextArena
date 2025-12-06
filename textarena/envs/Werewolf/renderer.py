@@ -207,7 +207,6 @@ def render_json_game_state(
     """Render the game state in JSON format."""
 
     state_copy = game_state.copy()
-    print(state_copy)
 
     # Turn non-serializable objects into a serializable format
     state_copy["phase"] = str(state_copy["phase"])
