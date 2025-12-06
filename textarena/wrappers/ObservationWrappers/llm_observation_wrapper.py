@@ -43,6 +43,56 @@ class LLMObservationWrapper(ObservationWrapper):
         return self._convert_obs_to_str(player_id=player_id)
 
 
+class WerewolfObservationWrapper(LLMObservationWrapper):
+    """
+    A wrapper for the Werewolf game that manages game board observations.
+    It maintains a single game board state per player, updating it with new messages.
+    It is located in the second position of the observation list.
+    """
+    def observation(
+        self,
+        player_id: int,
+        observation: Optional[List[Tuple[int, str, ObservationType]]],
+    ):
+        if observation is not None:
+            if player_id not in self.full_observations:
+                self.full_observations[player_id] = []
+
+            for sender_id, message, obs_type in observation:
+
+                # Insert the latest game board right after the game description prompt
+                if obs_type == ObservationType.GAME_BOARD:
+                    if len(self.full_observations[player_id]) >= 2:
+
+                        # Update existing game board observation
+                        if self.full_observations[player_id][1][2] == ObservationType.GAME_BOARD:
+                            self.full_observations[player_id][1] = (
+                                sender_id,
+                                message,
+                                obs_type,
+                            )
+                        # Add the game board observation if not present
+                        else:
+                            self.full_observations[player_id].insert(
+                                1, (sender_id, message, obs_type)
+                            )
+
+                    elif len(self.full_observations[player_id]) == 1:
+                        self.full_observations[player_id].append(
+                            (sender_id, message, obs_type)
+                        )
+                    else:
+                        raise ValueError(
+                            "GAME_BOARD observation received but no initial prompt found."
+                        )
+                else:
+                    self.full_observations[player_id].append(
+                        (sender_id, message, obs_type)
+                    )
+
+        return self._convert_obs_to_str(player_id=player_id)
+
+
     
 class DiplomacyObservationWrapper(LLMObservationWrapper):
     def __init__(self, env: ta.Env):
