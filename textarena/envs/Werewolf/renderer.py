@@ -1,3 +1,13 @@
+import json
+from enum import Enum
+
+
+class RenderStateFormat(Enum):
+    HUMAN_READABLE = "human_readable"
+    JSON = "json"
+    NONE = "none"
+
+
 def render_players_list(player_roles: dict, alive_players: list, show_roles: bool = False) -> str:
     """Render the player list in a clean, text-friendly format."""
     lines = []
@@ -141,14 +151,13 @@ def render_seer_info(game_state: dict) -> str:
         lines.append("  • No players revealed yet")
     return "\n".join(lines)
 
-def render_game_state(
+
+def render_human_readable_game_state(
     game_state: dict,
-    show_players: bool = False,
-    show_roles: bool = False,
     viewer_is_witch: bool = False,
     viewer_is_seer: bool = False,
 ) -> str:
-    """Main Werewolf board renderer."""
+    """Render the game state in a human-readable format."""
     lines = [
         f"🐺 WEREWOLF GAME STATUS",
         "",
@@ -188,3 +197,69 @@ def render_game_state(
         lines.append(render_seer_info(game_state))
     
     return "\n".join(lines)
+
+
+def render_json_game_state(
+    game_state: dict,
+    viewer_is_witch: bool = False,
+    viewer_is_seer: bool = False,
+) -> str:
+    """Render the game state in JSON format."""
+
+    state_copy = game_state.copy()
+    print(state_copy)
+
+    # Turn non-serializable objects into a serializable format
+    state_copy["phase"] = str(state_copy["phase"])
+
+    # Remove non-public information
+    roles = state_copy.pop("player_roles")
+    state_copy.pop("role_pids")
+    state_copy.pop("poisoned_player_id")
+    state_copy.pop("voted_player_id")
+    state_copy.pop("werewolf_votes")
+    state_copy.pop("day_votes")
+
+    # Add werewolf ids
+    werewolf_ids = [pid for pid, role in roles.items() if role == "Werewolf"]
+    state_copy["werewolf_ids"] = werewolf_ids
+
+    if state_copy["phase"] != "Phase.WITCH_CHOICE":
+        # Only show attacked player during Witch phase
+        state_copy.pop("attacked_player_id", None)
+
+    if not viewer_is_witch:
+        # Only show potion counts to the Witch
+        state_copy.pop("num_cures", None)
+        state_copy.pop("num_poisons", None)
+
+    if not viewer_is_seer:
+        # Only show revealed players to the Seer
+        state_copy.pop("revealed_player_ids", None)
+
+    return f"<gamestate>{json.dumps(state_copy, indent=None)}</gamestate>"
+
+
+def render_game_state(
+    game_state: dict,
+    render_state_format: RenderStateFormat = RenderStateFormat.NONE,
+    viewer_is_witch: bool = False,
+    viewer_is_seer: bool = False,
+) -> str:
+    """Main Werewolf board renderer."""
+    if render_state_format == RenderStateFormat.NONE:
+        return ""
+
+    if render_state_format == RenderStateFormat.HUMAN_READABLE:
+        return render_human_readable_game_state(
+            game_state,
+            viewer_is_witch=viewer_is_witch,
+            viewer_is_seer=viewer_is_seer,
+        )
+
+    if render_state_format == RenderStateFormat.JSON:
+        return render_json_game_state(
+            game_state,
+            viewer_is_witch=viewer_is_witch,
+            viewer_is_seer=viewer_is_seer,
+        )
