@@ -4,7 +4,7 @@ from enum import Enum
 import re, random
 from typing import ClassVar, Set, Tuple, Dict, Optional, List, Type, TypeVar, TypedDict
 import textarena as ta
-from textarena.envs.Werewolf.renderer import render_game_state
+from textarena.envs.Werewolf.renderer import RenderStateFormat, render_game_state
 from collections import defaultdict
 
 MIN_PLAYERS = 6
@@ -333,9 +333,15 @@ def alive_roles(game_state: GameState) -> tuple[list[int], list[int]]:
 
     return alive_werewolves, alive_good
 
+
 class WerewolfEnv(ta.Env):
-    def __init__(self, werewolf_ratio: float = 0.33):
+    def __init__(
+            self,
+            werewolf_ratio: float = 0.33,
+            render_state_format : RenderStateFormat = RenderStateFormat.NONE
+            ):
         self.werewolf_ratio = werewolf_ratio
+        self.render_state_format = render_state_format
 
     def reset(self, num_players: int, seed: Optional[int] = None):
         assert MIN_PLAYERS <= num_players <= MAX_PLAYERS, f"Player count must be between {MIN_PLAYERS} and {MAX_PLAYERS}. Got {num_players} players."
@@ -358,17 +364,17 @@ class WerewolfEnv(ta.Env):
         witch_ids = role_pids.get(WITCH_NAME, [])
         for witch_pid in witch_ids:
             if witch_pid in alive_ids:
-                witch_board = render_game_state(game_state, viewer_is_witch=True)
+                witch_board = render_game_state(game_state, self.render_state_format, viewer_is_witch=True)
                 self.state.add_observation(to_id=witch_pid, message=witch_board, observation_type=ta.ObservationType.GAME_BOARD)
 
         seer_ids = role_pids.get(SEER_NAME, [])
         for seer_pid in seer_ids:
             if seer_pid in alive_ids:
-                seer_board = render_game_state(game_state, viewer_is_seer=True)
+                seer_board = render_game_state(game_state, self.render_state_format, viewer_is_seer=True)
                 self.state.add_observation(to_id=seer_pid, message=seer_board, observation_type=ta.ObservationType.GAME_BOARD)
         
         # Send public board to all other players (Villagers, Werewolves, and any other roles)
-        public_board = render_game_state(game_state)
+        public_board = render_game_state(game_state, self.render_state_format)
         for player_id in alive_ids:
             # Skip Witch and Seer as they already got their specific boards
             if player_id not in witch_ids and player_id not in seer_ids:
