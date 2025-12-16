@@ -209,12 +209,12 @@ class Merlin(Role):
     def get_prompt(
             self, player_id: int, player_roles: Dict[int, str], num_players: int, num_discussion_rounds: int
         ) -> str:
-            evil_players = get_evil_players(player_id, player_roles, include_oberon=False)
+            evil_players = get_evil_players(player_id, player_roles, include_oberon=False, include_mordred=False)
             has_mordred = MORDRED_NAME in player_roles.values()
             return (
                 self.base_prompt(player_id, player_roles, num_players) +
-                f"\nYou secretly know the Evil players: {', '.join(evil_players)}.\n"
-                f"except you do not know who Mordred is" if has_mordred else ""
+                f"\nYou secretly know the Evil players: {', '.join(evil_players)}.\n" +
+                ("except you do not know who Mordred is.\n" if has_mordred else "")
             )
 
 
@@ -264,19 +264,19 @@ class Oberon(Role):
             "\nYou do not know who the other Evil players are, and they do not know you.\n"
         )
 
-def get_evil_pids(player_id: int, player_roles: Dict[int, str], include_oberon: bool = False) -> list[int]:
-    evil_pids = [pid for pid, role in player_roles.items() if role in EVIL_NAMES and (include_oberon or role != OBERON_NAME) and pid != player_id]
+def get_evil_pids(player_id: int, player_roles: Dict[int, str], include_oberon: bool = False, include_mordred: bool = True) -> list[int]:
+    evil_pids = [pid for pid, role in player_roles.items() if role in EVIL_NAMES and (include_oberon or role != OBERON_NAME) and (include_mordred or role != MORDRED_NAME) and pid != player_id]
     return evil_pids
 
-def get_evil_players(player_id: int, player_roles: Dict[int, str], include_oberon: bool = False) -> list[str]:
-    evil_pids = get_evil_pids(player_id, player_roles, include_oberon=include_oberon)
+def get_evil_players(player_id: int, player_roles: Dict[int, str], include_oberon: bool = False, include_mordred: bool = True) -> list[str]:
+    evil_pids = get_evil_pids(player_id, player_roles, include_oberon=include_oberon, include_mordred=include_mordred)
     evil_players = [f"Player {pid}" for pid in evil_pids]
     return evil_players
 
 def evil_players_prompt(player_id: int, player_roles: Dict[int, str]) -> str:
     has_oberon = OBERON_NAME in player_roles.values()
-    evil_players = get_evil_players(player_id, player_roles, include_oberon=False)
-    return f"The Evil players are: {', '.join(evil_players)}." + "Oberon is hidden from you.\n" if has_oberon else ""
+    evil_players = get_evil_players(player_id, player_roles, include_oberon=False, include_mordred=True)
+    return f"The Evil players are: {', '.join(evil_players)}." + (" Oberon is hidden from you.\n" if has_oberon else "")
 
 T = TypeVar("T")
 
@@ -340,12 +340,12 @@ class AvalonParser:
         Parses the pid of a merlin guess from text.
         Returns pid of the merlin guess, or None if not found.
         """
-        m = AvalonParser.action_pattern.search(text)
+        m = AvalonParser.merlin_guess_pattern.search(text)
         return int(m.group(1)) if m else None
 
-def is_mission_success(mission_actions: Dict[int, str]) -> bool:
-    success = all(action == "success" for action in mission_actions.values())
-    return success
+def get_mission_fail_count(mission_actions: Dict[int, str]) -> int:
+    """Returns the number of fail actions in the mission."""
+    return sum(1 for action in mission_actions.values() if action != "success")
 
 def is_team_proposal_passed(votes: Dict[int, str]) -> bool:
     approve_count = sum(1 for v in votes.values() if v == "approve")
@@ -690,27 +690,46 @@ class AvalonEnv(ta.Env):
         self.state.add_observation(from_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
     
     def _record_mission_action(self, pid: int, action: str):
-        action = AvalonParser.parse_mission_action(action)
-        if action is None:
+        # Check if player is on the mission team
+        mission_team = self.state.game_state["team_proposal"]
+        if pid not in mission_team:
+            fatal = self.state.set_invalid_move("You are not on the mission team")
+            if not fatal:
+                return
+            # Too many invalid actions, cannot default - player not on team
+            return
+        
+        action1 = AvalonParser.parse_mission_action(action)
+        if action1 is None:
             fatal = self.state.set_invalid_move("Mission action not in valid format")
             if not fatal:
                 return
             # Too many invalid actions, use default action
-            action = DEFAULT_MISSION_ACTION
+            action1 = DEFAULT_MISSION_ACTION
+            self.state.made_invalid_move = False
+        
+        # Good players cannot fail missions
+        player_role = self.state.game_state["player_roles"][pid]
+        if player_role in GOOD_NAMES and action1 == "fail":
+            fatal = self.state.set_invalid_move("Good players cannot fail missions")
+            if not fatal:
+                return
+            # Too many invalid actions, use default action (success)
+            action1 = DEFAULT_MISSION_ACTION
             self.state.made_invalid_move = False
 
-        self.state.game_state["mission_actions"][pid] = action
+        self.state.game_state["mission_actions"][pid] = action1
     
     def _record_merlin_guess(self, pid: int, guess: str):
-        guess = AvalonParser.parse_merlin_guess()
-        if guess is None:
+        guess1 = AvalonParser.parse_merlin_guess(guess)
+        if guess1 is None:
             fatal = self.state.set_invalid_move("Merlin guess not in valid format")
             if not fatal:
                 return
             # Too many invalid guesses, guess random player
-            guess = random.randint(0, self.state.num_players - 1)
+            guess1 = random.randint(0, self.state.num_players - 1)
             self.state.made_invalid_move = False
-        self.state.game_state["merlin_guesses"][pid] = guess
+        self.state.game_state["merlin_guesses"][pid] = guess1
 
     def _inc_consecutive_failed_team_proposals(self):
         self.state.game_state["consecutive_failed_team_proposals"] += 1
@@ -722,11 +741,25 @@ class AvalonEnv(ta.Env):
         if not vote_passed:
             self._inc_consecutive_failed_team_proposals()
             self.state.add_observation(message="No consensus - the team proposal was not passed.", observation_type=ta.ObservationType.GAME_MESSAGE)
-            return
-        self.state.game_state["consecutive_failed_team_proposals"] = 0
+        else:
+            self.state.game_state["consecutive_failed_team_proposals"] = 0
+        # Clear votes after resolving
+        self.state.game_state["votes"].clear()
     
-    def _is_mission_success(self) -> bool:
-        return is_mission_success(self.state.game_state["mission_actions"])
+    def _is_mission_success(self) -> Tuple[bool, int]:
+        """Returns (success, fail_count) tuple."""
+        mission_index = self.state.game_state["mission_index"]
+        mission_size = self._get_mission_team_size()
+        fail_count = get_mission_fail_count(self.state.game_state["mission_actions"])
+        
+        # Special rule: For 7+ players, mission 4 (index 3) requires 2 fails to fail
+        if self.state.num_players >= 7 and mission_index == 3:
+            success = fail_count < 2
+        else:
+            # Default rule: Mission fails if there's at least 1 fail
+            success = fail_count == 0
+        
+        return (success, fail_count)
     
     def _inc_mission_successes(self):
         self.state.game_state["mission_successes"] += 1
@@ -737,14 +770,20 @@ class AvalonEnv(ta.Env):
         self._check_win()
     
     def _resolve_mission_outcome(self):
-        success = self._is_mission_success()
+        success, fail_count = self._is_mission_success()
+        mission_size = len(self.state.game_state["mission_actions"])
+        success_count = mission_size - fail_count
         self.state.game_state["mission_actions"].clear()
+        
         if success:
             self._inc_mission_successes()
-            message = "Mission Succeeded. All actions were success."
+            message = f"Mission Succeeded. {success_count} success(es), {fail_count} fail(s)."
         else:
             self._inc_mission_failures()
-            message = "Mission Failed. At least one action was fail"
+            message = f"Mission Failed. {success_count} success(es), {fail_count} fail(s)."
+
+        self.state.game_state["mission_index"] += 1
+        self.state.game_state["team_proposal"].clear()
         self.state.add_observation(message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
         self._inc_leader()
 
