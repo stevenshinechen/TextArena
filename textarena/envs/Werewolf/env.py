@@ -16,14 +16,14 @@ You are playing Werewolf, a hidden-role social deduction game.
 WEREWOLF GAME RULES
 
 Sides:
-• Good: Villager, Seer, Witch
+• Good: Villager, Seer, Witch, Guard
 • Evil: Werewolves
 
 Hidden information:
 • Werewolves know the identities of all Werewolves.
 • Other players know only their own role.
 
-Phases repeat in order: Werewolf-Discussion → Werewolf-Vote → Seer-Reveal → Witch-Choice → Day-Discussion → Day-Vote.
+Phases repeat in order: Werewolf-Discussion → Werewolf-Vote → Guard-Protect → Witch-Choice → Seer-Reveal → Day-Discussion → Day-Vote.
 
 Werewolf-Discussion:
 • Werewolves can discuss and collectively decide on a target to eliminate.
@@ -32,6 +32,12 @@ Werewolf-Discussion:
 Werewolf-Vote:
 • Werewolves vote on one living target to eliminate.
 • The chosen target will be attacked.
+
+Guard-Protect:
+• Guard chooses one living player to protect from Werewolf attacks.
+• Cannot protect the same player on consecutive nights.
+• Cannot prevent Witch's poison.
+• Actions are private and performed only by the Guard.
 
 Seer-Reveal:
 • Seer selects one living player to learn whether they are a Werewolf.
@@ -42,7 +48,6 @@ Witch-Choice:
   - Use Cure once in the game to save the attacked player.
   - Use Poison once in the game to eliminate a living player.
 • Only one Witch potion may be used per night.
-• The Witch can only save themselves on the first night; they cannot save themselves on subsequent nights if killed.
 • Actions are private and performed only by the Witch.
 
 Day-Discussion:
@@ -71,10 +76,11 @@ VILLAGER_NAME = "Villager"
 WEREWOLF_NAME = "Werewolf"
 SEER_NAME = "Seer"
 WITCH_NAME = "Witch"
+GUARD_NAME = "Guard"
 
 # Alignment sets
 EVIL_NAMES = {WEREWOLF_NAME}
-GOOD_NAMES = {VILLAGER_NAME, SEER_NAME, WITCH_NAME}
+GOOD_NAMES = {VILLAGER_NAME, SEER_NAME, WITCH_NAME, GUARD_NAME} 
 
 # Base role descriptions
 BASE_ROLE_DESCRIPTIONS = {
@@ -88,18 +94,23 @@ BASE_ROLE_DESCRIPTIONS = {
         "At night, may reveal one living player to learn whether they are a Werewolf."
     ),
     WITCH_NAME: (
-        "At night, learns the Werewolves’ target; has one Cure (save the attacked player) and one Poison (eliminate a living player)."
+        "At night, learns the Werewolves' target; has one Cure (save the attacked player) and one Poison (eliminate a living player)."
+    ),
+    GUARD_NAME: (
+        "Each night, chooses one living player to protect. If that player is targeted by Werewolves, the kill is prevented. "
+        "Cannot protect the same player on two consecutive nights. Cannot stop the Witch's poison. Receives no feedback about protection success."
     ),
 }
 
 class Phase(Enum):
     WEREWOLF_DISCUSSION = "Werewolf-Discussion"
     WEREWOLF_VOTE = "Werewolf-Vote"
-    SEER_REVEAL = "Seer-Reveal"
+    GUARD_PROTECT = "Guard-Protect"
     WITCH_CHOICE = "Witch-Choice"
+    SEER_REVEAL = "Seer-Reveal"
     DAY_DISCUSSION = "Day-Discussion"
     DAY_VOTE = "Day-Vote"
-
+    
 INITIAL_PHASE = Phase.WEREWOLF_DISCUSSION
 
 def get_team(role_name: str) -> str:
@@ -191,28 +202,48 @@ class Werewolf(Role):
 class Seer(Role):
     def get_prompt(self, player_id: int, game_state: Dict) -> str:
         player_roles = game_state["player_roles"]
+        revealed_info = []
+        for pid in game_state["revealed_player_ids"]:
+            is_wolf = player_roles[pid] == WEREWOLF_NAME
+            revealed_info.append(f"Player {pid}: {'Werewolf' if is_wolf else 'not a Werewolf'}")
+        
+        revealed_text = "\n".join(revealed_info) if revealed_info else "No players revealed yet."
         return self.base_prompt(player_id, game_state) + (
-            "\nEach night, you can reveal one new player to learn their true role." +
-            f"You know the following players roles:\n"
-            + "\n".join([f"Player {pid}: {player_roles[pid]}" for pid in game_state["revealed_player_ids"]])
+            "\nEach night, you can reveal one new player to learn their true role.\n" +
+            f"You know the following players roles:\n{revealed_text}\n"
         )
 
 class Witch(Role):
     def get_prompt(self, player_id: int, game_state: Dict) -> str:
         base = self.base_prompt(player_id, game_state)
         
-        if game_state.get("attacked_player_id") is not None:
-            attacked_player = game_state["attacked_player_id"]
-            attacked_info = f"Player {attacked_player} was attacked by the Werewolves this night.\n"
+        attacked_player_id = game_state.get("attacked_player_id")
+        num_cures = game_state.get("num_cures", 0)
+        num_poisons = game_state.get("num_poisons", 0)
+        
+        if attacked_player_id is not None:
+            attacked_info = f"Player {attacked_player_id} was attacked by the Werewolves this night.\n"
+            potion_info = f"You have {num_cures} Cure potion(s) and {num_poisons} Poison potion(s). "
+            action_info = f"You can use a Cure potion to save Player {attacked_player_id} (the attacked player) or use a Poison potion to kill a player."
         else:
             attacked_info = "No one was attacked by the Werewolves this night.\n"
+            potion_info = f"You have {num_poisons} Poison potion(s). "
+            action_info = "You can use a Poison potion to kill a player."
         
         return base + (
             f"{attacked_info}"
-            f"You have {game_state['num_cures']} Cure potion(s) and {game_state['num_poisons']} Poison potion(s). "
-            f"You can use a Cure potion to save a player or use a Poison potion to kill a player."
+            f"{potion_info}"
+            f"{action_info}"
         )
-    
+
+class Guard(Role):
+    def get_prompt(self, player_id: int, game_state: Dict) -> str:
+        base = self.base_prompt(player_id, game_state)
+        return base + (
+            f"Each night, you can choose one living player to protect. If that player is targeted by Werewolves, the kill is prevented. "
+            f"You cannot protect the same player on two consecutive nights. You cannot stop the Witch's poison. You receive no feedback about protection success."
+        )
+
 class WerewolfParser:
     # Witch cure pattern: <cure></cure>
     cure_pattern = re.compile(r"<cure>\s*</cure>", re.IGNORECASE)
@@ -232,6 +263,17 @@ class WerewolfParser:
     # Vote pattern: <vote>(any number)</vote>
     vote_pattern = re.compile(r"<vote>\s*(\d+)\s*</vote>", re.IGNORECASE)
 
+    # Guard protect pattern: <protect>(any number)</protect>
+    protect_pattern = re.compile(r"<protect>\s*(\d+)\s*</protect>", re.IGNORECASE)
+
+    @staticmethod
+    def parse_protect(text: str) -> Optional[int]:
+        """
+        Parses a guard protect action from text.
+        Returns the target player ID, or None if not found.
+        """
+        m = WerewolfParser.protect_pattern.search(text)
+        return int(m.group(1)) if m else None
 
     @staticmethod
     def parse_kill(text: str) -> Optional[int]:
@@ -290,6 +332,8 @@ class GameState(TypedDict):
     attacked_player_id: Optional[int]
     poisoned_player_id: Optional[int]
     voted_player_id: Optional[int]
+    protected_player_id: Optional[int]
+    last_protected_player_id: Optional[int]
     revealed_player_ids: List[int]
     num_cures: int
     num_poisons: int
@@ -311,6 +355,8 @@ def init_game_state(num_players: int, player_roles: Dict[int, str], werewolf_rat
         attacked_player_id=None,
         poisoned_player_id=None,
         voted_player_id=None,
+        protected_player_id=None,
+        last_protected_player_id=None,
         revealed_player_ids=[],
         num_cures=num_cures,
         num_poisons=num_poisons,
@@ -351,10 +397,9 @@ class WerewolfEnv(ta.Env):
         game_state = init_game_state(num_players, self.player_roles, self.werewolf_ratio, num_cures=1, num_poisons=1)
         self.state.reset(game_state=game_state, player_prompt_function=self._prompt, secret_roles=self.player_roles)
         self._render_game_state()
-
         self._send_phase_prompts() # populate self.next_player_ids
         self.state.manually_set_current_player_id(self.next_player_ids.pop())
-    
+        
     def _render_game_state(self):
         game_state = self.state.game_state
         role_pids = self.state.game_state.get("role_pids", {})
@@ -372,12 +417,18 @@ class WerewolfEnv(ta.Env):
             if seer_pid in alive_ids:
                 seer_board = render_game_state(game_state, self.render_state_format, viewer_is_seer=True)
                 self.state.add_observation(to_id=seer_pid, message=seer_board, observation_type=ta.ObservationType.GAME_BOARD)
+
+        guard_ids = role_pids.get(GUARD_NAME, [])
+        for guard_pid in guard_ids:
+            if guard_pid in alive_ids:
+                guard_board = render_game_state(game_state, self.render_state_format, viewer_is_guard=True)
+                self.state.add_observation(to_id=guard_pid, message=guard_board, observation_type=ta.ObservationType.GAME_BOARD)
         
         # Send public board to all other players (Villagers, Werewolves, and any other roles)
         public_board = render_game_state(game_state, self.render_state_format)
         for player_id in alive_ids:
-            # Skip Witch and Seer as they already got their specific boards
-            if player_id not in witch_ids and player_id not in seer_ids:
+            # Skip Witch, Seer, and Guard as they already got their specific boards
+            if player_id not in witch_ids and player_id not in seer_ids and player_id not in guard_ids:
                 self.state.add_observation(to_id=player_id, message=public_board, observation_type=ta.ObservationType.GAME_BOARD)
 
     def _assign_roles(self, num_players: int):
@@ -396,8 +447,20 @@ class WerewolfEnv(ta.Env):
         num_werewolves = max(1, round(num_players * self.werewolf_ratio))
         num_seers = 1
         num_witches = 1
-        num_villagers = num_players - num_werewolves - num_seers - num_witches
-        role_pool = ["Werewolf"] * num_werewolves + ["Villager"] * num_villagers + ["Seer"] * num_seers + ["Witch"] * num_witches
+        num_guards = 1
+        num_villagers = num_players - num_werewolves - num_seers - num_witches - num_guards
+        
+        # Validate that we have enough players for all required roles
+        if num_villagers < 0:
+            min_players_needed = num_werewolves + num_seers + num_witches + num_guards
+            raise ValueError(
+                f"Too many werewolves for player count. "
+                f"With {num_players} players and werewolf_ratio={self.werewolf_ratio}, "
+                f"there would be {num_werewolves} werewolves, but need at least {min_players_needed} players "
+                f"to accommodate all required roles (Werewolf, Seer, Witch, Guard)."
+            )
+        
+        role_pool = ["Werewolf"] * num_werewolves + ["Villager"] * num_villagers + ["Seer"] * num_seers + ["Witch"] * num_witches + ["Guard"] * num_guards
         random.shuffle(role_pool)
         return role_pool
 
@@ -406,8 +469,9 @@ class WerewolfEnv(ta.Env):
         phase_dispatch = {
             Phase.WEREWOLF_DISCUSSION: self._handle_werewolf_discussion,
             Phase.WEREWOLF_VOTE: self._handle_werewolf_vote,
-            Phase.SEER_REVEAL: self._handle_seer_reveal,
+            Phase.GUARD_PROTECT: self._handle_guard_protect,
             Phase.WITCH_CHOICE: self._handle_witch_choice,
+            Phase.SEER_REVEAL: self._handle_seer_reveal,
             Phase.DAY_DISCUSSION: self._handle_day_discussion,
             Phase.DAY_VOTE: self._handle_day_vote,
         }
@@ -434,6 +498,31 @@ class WerewolfEnv(ta.Env):
                 return
         self.state.game_state["werewolf_votes"][pid] = target
 
+    def _handle_guard_protect(self, pid: int, action: str):
+        target = WerewolfParser.parse_protect(action)
+        if target is None or target not in self.state.game_state["alive_player_ids"]:
+            fatal = self.state.set_invalid_move("Invalid protect target.")
+            if not fatal: 
+                return
+            else: # player was eliminated by invalid move
+                self.state.made_invalid_move = False  # such that we can rotate off the player 
+                return
+        
+        # Check if same as last night's protection
+        last_protected = self.state.game_state.get("last_protected_player_id")
+        if target == last_protected:
+            fatal = self.state.set_invalid_move("Cannot protect the same player on consecutive nights.")
+            if not fatal:
+                return
+            else: # player was eliminated by invalid move
+                self.state.made_invalid_move = False  # such that we can rotate off the player
+                self.state.game_state["last_protected_player_id"] = None
+                return
+        
+        self.state.game_state["protected_player_id"] = target
+        # The guard should know their own actions for future reference
+        self.state.add_observation(from_id=pid, to_id=pid, message=action, observation_type=ta.ObservationType.PLAYER_ACTION)
+
     def _handle_seer_reveal(self, pid: int, action: str):
         target = WerewolfParser.parse_reveal(action)
         if target is None or target not in self.state.game_state["alive_player_ids"]:
@@ -456,6 +545,14 @@ class WerewolfEnv(ta.Env):
                 return
     
         if action_type == "cure":
+            # Check if there's an attacked player to cure
+            if self.state.game_state["attacked_player_id"] is None:
+                fatal = self.state.set_invalid_move("No player was attacked, so there is no one to cure.")
+                if not fatal:
+                    return
+                else: # player was eliminated by invalid move
+                    self.state.made_invalid_move = False  # such that we can rotate off the player 
+                    return
             if self.state.game_state["num_cures"] <= 0:
                 fatal = self.state.set_invalid_move("You have no more Cure potions left.")
                 if not fatal: 
@@ -513,7 +610,6 @@ class WerewolfEnv(ta.Env):
                 self._resolve_werewolf_vote()
             case Phase.SEER_REVEAL:
                 self._resolve_seer_reveal()
-            case Phase.WITCH_CHOICE:
                 self._resolve_night_actions()
             case Phase.DAY_VOTE:
                 self._resolve_day_vote()
@@ -581,12 +677,21 @@ class WerewolfEnv(ta.Env):
     def _resolve_night_actions(self):
         attacked = self.state.game_state["attacked_player_id"]
         poisoned = self.state.game_state["poisoned_player_id"]
+        protected = self.state.game_state["protected_player_id"]
+        alive_players = self.state.game_state["alive_player_ids"]
 
         if attacked is not None:
-            self._eliminate_player(attacked, "was killed by Werewolves during the night")
+            # Guard protection prevents werewolf kill
+            if attacked != protected and attacked in alive_players:
+                self._eliminate_player(attacked, "was killed by Werewolves during the night")
+                # Update alive_players after elimination
+                alive_players = self.state.game_state["alive_player_ids"]
 
-        if self.state.game_state["num_poisons"] == 0 and poisoned is not None:
-            self._eliminate_player(poisoned, "was poisoned by the Witch during the night")
+        if poisoned is not None and poisoned in alive_players:
+                self._eliminate_player(poisoned, "was poisoned by the Witch during the night")
+        # Save protected player ID for next round's consecutive night check
+        if protected is not None:
+            self.state.game_state["last_protected_player_id"] = protected
 
     def _resolve_day_vote(self):
         # Count all day votes
@@ -609,18 +714,23 @@ class WerewolfEnv(ta.Env):
     def _reset_round_state(self):
         self.state.game_state["voted_player_id"] = None
         self.state.game_state["attacked_player_id"] = None
+        self.state.game_state["protected_player_id"] = None
+        self.state.game_state["poisoned_player_id"] = None
         self.state.game_state["werewolf_votes"] = {}
         self.state.game_state["day_votes"] = {}
+        # Note: last_protected_player_id is preserved for consecutive night check
 
     def _compute_next_phase(self) -> Phase:
         match self.phase:
             case Phase.WEREWOLF_DISCUSSION:
                 return Phase.WEREWOLF_VOTE
             case Phase.WEREWOLF_VOTE:
-                return Phase.SEER_REVEAL
-            case Phase.SEER_REVEAL:
+                return Phase.GUARD_PROTECT
+            case Phase.GUARD_PROTECT:
                 return Phase.WITCH_CHOICE
             case Phase.WITCH_CHOICE:
+                return Phase.SEER_REVEAL
+            case Phase.SEER_REVEAL:
                 return Phase.DAY_DISCUSSION
             case Phase.DAY_DISCUSSION:
                 return Phase.DAY_VOTE
@@ -658,6 +768,61 @@ class WerewolfEnv(ta.Env):
                     self.state.add_observation(to_id=pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
                 self.next_player_ids = werewolf_ids
 
+            # Guard protect
+            case Phase.GUARD_PROTECT:
+                guard_ids = gs["role_pids"].get(GUARD_NAME, [])
+                alive_guards = [pid for pid in guard_ids if pid in gs["alive_player_ids"]]
+                if alive_guards:
+                    for guard_pid in alive_guards:
+                        message = (
+                            "Night action: You are the Guard.\n" +
+                            "Choose one living player to protect.\n" +
+                            "Reply only with your choice: <protect>player_id</protect>\n" +
+                            "Example: <protect>2</protect>"
+                        )
+                        self.state.add_observation(to_id=guard_pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
+                    self.next_player_ids = alive_guards
+                else:
+                    self.next_player_ids = []
+
+            # Witch choice
+            case Phase.WITCH_CHOICE:
+                witch_ids = gs["role_pids"].get(WITCH_NAME, [])
+                alive_witches = [pid for pid in witch_ids if pid in gs["alive_player_ids"]]
+                if alive_witches:
+                    num_cures = gs.get("num_cures", 0)
+                    num_poisons = gs.get("num_poisons", 0)
+                    attacked_player_id = gs.get("attacked_player_id")
+                    
+                    # Build dynamic message based on available potions
+                    actions = []
+                    if num_cures > 0 and attacked_player_id is not None:
+                        actions.append("- Save them: <cure></cure>")
+                    if num_poisons > 0:
+                        actions.append("- Poison someone: <poison>player_id</poison>")
+                    actions.append("- Do nothing: <no_action></no_action>")
+                    
+                    actions_text = "\n".join(actions)
+                    example = f"Example: <poison>4</poison>" if num_poisons > 0 else ""
+                    
+                    # Build attack info message
+                    if attacked_player_id is not None:
+                        attack_info = f"You know who was attacked. Choose one action:\n"
+                    else:
+                        attack_info = "No one was attacked this night. Choose one action:\n"
+                    
+                    for witch_pid in alive_witches:
+                        message = (
+                            f"Night action: You are the Witch.\n" +
+                            f"{attack_info}" +
+                            f"{actions_text}" +
+                            (f"\n{example}" if example else "")
+                        )
+                        self.state.add_observation(to_id=witch_pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
+                    self.next_player_ids = alive_witches
+                else:
+                    self.next_player_ids = []
+
             # Seer reveal
             case Phase.SEER_REVEAL:
                 seer_ids = gs["role_pids"].get(SEER_NAME, [])
@@ -672,37 +837,6 @@ class WerewolfEnv(ta.Env):
                         )
                         self.state.add_observation(to_id=seer_pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
                     self.next_player_ids = alive_seers
-                else:
-                    self.next_player_ids = []
-
-            # Witch choice
-            case Phase.WITCH_CHOICE:
-                witch_ids = gs["role_pids"].get(WITCH_NAME, [])
-                alive_witches = [pid for pid in witch_ids if pid in gs["alive_player_ids"]]
-                if alive_witches:
-                    num_cures = gs.get("num_cures", 0)
-                    num_poisons = gs.get("num_poisons", 0)
-                    
-                    # Build dynamic message based on available potions
-                    actions = []
-                    if num_cures > 0:
-                        actions.append("- Save them: <cure></cure>")
-                    if num_poisons > 0:
-                        actions.append("- Poison someone: <poison>player_id</poison>")
-                    actions.append("- Do nothing: <no_action></no_action>")
-                    
-                    actions_text = "\n".join(actions)
-                    example = f"Example: <poison>4</poison>" if num_poisons > 0 else ""
-                    
-                    for witch_pid in alive_witches:
-                        message = (
-                            f"Night action: You are the Witch.\n" +
-                            f"You know who was attacked. Choose one action:\n" +
-                            f"{actions_text}" +
-                            (f"\n{example}" if example else "")
-                        )
-                        self.state.add_observation(to_id=witch_pid, message=message, observation_type=ta.ObservationType.GAME_MESSAGE)
-                    self.next_player_ids = alive_witches
                 else:
                     self.next_player_ids = []
 

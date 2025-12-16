@@ -152,10 +152,24 @@ def render_seer_info(game_state: dict) -> str:
     return "\n".join(lines)
 
 
+def render_guard_info(game_state: dict) -> str:
+    """Render Guard-only information about last protected player."""
+    protected_player_id = game_state.get("protected_player_id")
+    
+    lines = []
+    lines.append("🛡️ Guard Protection:")
+    if protected_player_id is not None:
+        lines.append(f"  • Last protected: Player {protected_player_id}")
+    else:
+        lines.append("  • No player protected yet")
+    return "\n".join(lines)
+
+
 def render_human_readable_game_state(
     game_state: dict,
     viewer_is_witch: bool = False,
     viewer_is_seer: bool = False,
+    viewer_is_guard: bool = False,
 ) -> str:
     """Render the game state in a human-readable format."""
     lines = [
@@ -196,6 +210,12 @@ def render_human_readable_game_state(
             lines.append("")
         lines.append(render_seer_info(game_state))
     
+    # Guard-only information: last protected player
+    if viewer_is_guard:
+        if lines and lines[-1] != "":
+            lines.append("")
+        lines.append(render_guard_info(game_state))
+    
     return "\n".join(lines)
 
 
@@ -203,6 +223,7 @@ def render_json_game_state(
     game_state: dict,
     viewer_is_witch: bool = False,
     viewer_is_seer: bool = False,
+    viewer_is_guard: bool = False,
 ) -> str:
     """Render the game state in JSON format."""
 
@@ -244,6 +265,7 @@ def render_game_state(
     render_state_format: RenderStateFormat = RenderStateFormat.NONE,
     viewer_is_witch: bool = False,
     viewer_is_seer: bool = False,
+    viewer_is_guard: bool = False,
 ) -> str:
     """Main Werewolf board renderer."""
     if render_state_format == RenderStateFormat.NONE:
@@ -254,6 +276,7 @@ def render_game_state(
             game_state,
             viewer_is_witch=viewer_is_witch,
             viewer_is_seer=viewer_is_seer,
+            viewer_is_guard=viewer_is_guard,
         )
 
     if render_state_format == RenderStateFormat.JSON:
@@ -261,4 +284,5 @@ def render_game_state(
             game_state,
             viewer_is_witch=viewer_is_witch,
             viewer_is_seer=viewer_is_seer,
+            viewer_is_guard=viewer_is_guard,
         )
