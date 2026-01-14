@@ -7,6 +7,9 @@ checkpoints
 wandb
 *.out
 
+# UI
+node_modules/
+
 ### DEFAULTS FROM GITHUB ###
 __pycache__/
 *.py[cod]
