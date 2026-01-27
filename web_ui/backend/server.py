@@ -1,9 +1,6 @@
-"""
-TextArena Web UI Backend Server
+"""TextArena Web UI Backend Server"""
 
-Follows the standard TextArena game loop pattern (see examples/werewolf_play.py).
-"""
-
+import re
 import uuid
 from typing import Any, Optional
 from dataclasses import dataclass
@@ -20,14 +17,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 import textarena as ta
 
 
-# ============================================================================
 # Models
-# ============================================================================
-
 
 class PlayerConfig(BaseModel):
     player_id: int
-    player_type: str  # "human" or "agent"
+    player_type: str
     agent_model: Optional[str] = None
 
 
@@ -46,76 +40,82 @@ class GameStateResponse(BaseModel):
     current_player_id: int
     is_human_turn: bool
     observation: str
+    latest_observation: str
+    current_phase: Optional[str] = None
     done: bool
     rewards: Optional[dict[int, int]] = None
-    game_info: Optional[Any] = None  # Can have int keys from TextArena
+    game_info: Optional[Any] = None
 
 
-# ============================================================================
-# Game Session (follows werewolf_play.py pattern)
-# ============================================================================
+# Game Session
 
 
 @dataclass
 class GameSession:
-    """A game session following the standard TextArena pattern."""
-
     game_id: str
     env: ta.Env
-    agents: dict[int, Optional[ta.Agent]]  # None = human player
-    human_observation: str = ""  # Store human's last observation
+    agents: dict[int, Optional[ta.Agent]]
+    full_history: str = ""
+    current_turn_observation: str = ""
     done: bool = False
     rewards: Optional[dict[int, int]] = None
     game_info: Optional[dict[str, Any]] = None
+    current_player_id: int = 0
 
-    current_player_id: int = 0  # Track current player
+    def _get_phase(self) -> Optional[str]:
+        env = self.env
+        while hasattr(env, "env"):
+            env = env.env
+        if hasattr(env, "phase"):
+            return getattr(env.phase, "value", str(env.phase))
+        return None
+
+    def _to_str(self, obs) -> str:
+        return obs if isinstance(obs, str) else str(obs)
+
+    def _append_history(self, player_id: int, obs: str, is_human: bool):
+        label = "Human" if is_human else "AI"
+        self.full_history += f"\n{'='*60}\n[Player {player_id} ({label}) Turn]\n{'='*60}\n{self._to_str(obs)}"
+
+    def _set_human_observation(self, player_id: int, obs):
+        self.current_turn_observation = self._to_str(obs)
+        self._append_history(player_id, obs, is_human=True)
 
     def get_state(self) -> GameStateResponse:
-        """Get current state - only show human's observation."""
         return GameStateResponse(
             game_id=self.game_id,
             current_player_id=self.current_player_id,
-            is_human_turn=(self.agents.get(self.current_player_id) is None),
-            observation=self.human_observation,
+            is_human_turn=self.agents.get(self.current_player_id) is None,
+            observation=self.full_history,
+            latest_observation=self.current_turn_observation,
+            current_phase=self._get_phase(),
             done=self.done,
             rewards=self.rewards,
             game_info=self.game_info,
         )
 
-    def _refresh_state(self):
-        """Update current player and observation from env."""
-        player_id, observation = self.env.get_observation()
-        self.current_player_id = player_id
-
-        # Only update human observation when it's human's turn
-        if self.agents.get(player_id) is None:
-            self.human_observation = (
-                observation if isinstance(observation, str) else str(observation)
-            )
-
     def step(self, action: str):
-        """Execute one step: env.step(action)."""
         self.done, _ = self.env.step(action=action)
         if self.done:
             self.rewards, self.game_info = self.env.close()
         else:
-            self._refresh_state()
+            player_id, obs = self.env.get_observation()
+            self.current_player_id = player_id
+            if self.agents.get(player_id) is None:
+                self._set_human_observation(player_id, obs)
 
-    def run_agent_turns(self) -> GameStateResponse:
-        """Run the game loop for agent turns until human turn or done."""
+    def run_agents(self) -> GameStateResponse:
         while not self.done:
-            player_id, observation = self.env.get_observation()
+            player_id, obs = self.env.get_observation()
             self.current_player_id = player_id
             agent = self.agents.get(player_id)
 
-            if agent is None:  # Human's turn - stop and wait for input
-                self.human_observation = (
-                    observation if isinstance(observation, str) else str(observation)
-                )
+            if agent is None:
+                self._set_human_observation(player_id, obs)
                 break
 
-            # Agent takes action (standard TextArena pattern)
-            action = agent(observation)
+            self._append_history(player_id, obs, is_human=False)
+            action = agent(obs)
             self.done, _ = self.env.step(action=action)
 
             if self.done:
@@ -124,50 +124,46 @@ class GameSession:
         return self.get_state()
 
 
-# ============================================================================
 # Game Manager
-# ============================================================================
-
 
 class GameManager:
     def __init__(self):
         self.sessions: dict[str, GameSession] = {}
 
     def create(self, config: GameConfig) -> GameSession:
-        """Create game following werewolf_play.py pattern."""
         game_id = str(uuid.uuid4())[:8]
 
-        # Build agents dict: {player_id: agent or None for human}
         agents: dict[int, Optional[ta.Agent]] = {}
+        needs_json_render = False
+
         for p in config.players:
             if p.player_type == "human":
                 agents[p.player_id] = None
-            elif (
-                p.agent_model == "random-werewolf"
-            ):  # TODO try to make this more general
+            elif p.agent_model == "random-werewolf":
                 agents[p.player_id] = ta.agents.RandomWerewolfAgent()
+                needs_json_render = True
             else:
                 agents[p.player_id] = ta.agents.OpenRouterAgent(
                     model_name=p.agent_model
                 )
 
-        # Initialize environment
-        env = ta.make(env_id=config.env_id)
+        # RandomWerewolfAgent requires JSON-formatted game state
+        env_kwargs = {}
+        if needs_json_render:
+            from textarena.envs.Werewolf.renderer import RenderStateFormat
 
-        # Only wrap if not already wrapped TODO maybe remove if
+            env_kwargs["render_state_format"] = RenderStateFormat.JSON
+
+        env = ta.make(env_id=config.env_id, **env_kwargs)
         if not env.is_wrapped_with(ta.wrappers.LLMObservationWrapper):
             env = ta.wrappers.LLMObservationWrapper(env)
-
         env.reset(num_players=len(agents), seed=config.seed)
 
         session = GameSession(game_id=game_id, env=env, agents=agents)
-        # Initialize state from env
-        player_id, observation = env.get_observation()
+        player_id, obs = env.get_observation()
         session.current_player_id = player_id
-        if agents.get(player_id) is None:  # Human's turn
-            session.human_observation = (
-                observation if isinstance(observation, str) else str(observation)
-            )
+        if agents.get(player_id) is None:
+            session._set_human_observation(player_id, obs)
 
         self.sessions[game_id] = session
         return session
@@ -179,9 +175,36 @@ class GameManager:
         return self.sessions.pop(game_id, None) is not None
 
 
-# ============================================================================
+# Error Handling
+
+
+def _parse_api_error(e: Exception) -> str:
+    s = str(e).lower()
+
+    if "429" in s or ("rate" in s and "limit" in s):
+        match = re.search(r"'message':\s*'([^']+)'", str(e))
+        if match:
+            return f"API Rate Limit Error: {match.group(1)}"
+        return (
+            "API Rate Limit Error: Quota exceeded. Add credits or wait before retrying."
+        )
+
+    if "401" in s or "unauthorized" in s or "authentication" in s:
+        return "API Authentication Error: Invalid API key."
+
+    if "quota" in s or "credit" in s:
+        return f"API Quota Error: {e}"
+
+    if "timeout" in s:
+        return "API Timeout Error: Model took too long. Try again."
+
+    if any(code in s for code in ["500", "502", "503"]):
+        return "API Server Error: Service temporarily unavailable."
+
+    return f"AI Agent Error: {e}"
+
+
 # FastAPI App
-# ============================================================================
 
 games = GameManager()
 app = FastAPI(title="TextArena Web UI", version="1.0.0")
@@ -208,19 +231,20 @@ def list_environments():
 @app.post("/games", response_model=GameStateResponse)
 def create_game(config: GameConfig):
     try:
-        session = games.create(config)
-        return session.get_state()  # Return immediately, don't run agents
+        return games.create(config).get_state()
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/games/{game_id}/run_agents", response_model=GameStateResponse)
 def run_agents(game_id: str):
-    """Run agent turns until human turn or game end."""
     session = games.get(game_id)
     if not session:
         raise HTTPException(status_code=404, detail="Game not found")
-    return session.run_agent_turns()
+    try:
+        return session.run_agents()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=_parse_api_error(e))
 
 
 @app.get("/games/{game_id}", response_model=GameStateResponse)
@@ -238,10 +262,11 @@ def submit_action(game_id: str, request: ActionRequest):
         raise HTTPException(status_code=404, detail="Game not found")
     if session.done:
         raise HTTPException(status_code=400, detail="Game already finished")
-
-    # Human step, then run agent turns
-    session.step(request.action)
-    return session.run_agent_turns()
+    try:
+        session.step(request.action)
+        return session.run_agents()
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=_parse_api_error(e))
 
 
 @app.delete("/games/{game_id}")
