@@ -19,6 +19,7 @@ import textarena as ta
 
 # Models
 
+
 class PlayerConfig(BaseModel):
     player_id: int
     player_type: str
@@ -75,11 +76,31 @@ class GameSession:
 
     def _append_history(self, player_id: int, obs: str, is_human: bool):
         label = "Human" if is_human else "AI"
-        self.full_history += f"\n{'='*60}\n[Player {player_id} ({label}) Turn]\n{'='*60}\n{self._to_str(obs)}"
+        self.full_history += f"\n{'=' * 60}\n[Player {player_id} ({label}) Turn]\n{'=' * 60}\n{self._to_str(obs)}"
 
     def _set_human_observation(self, player_id: int, obs):
         self.current_turn_observation = self._to_str(obs)
         self._append_history(player_id, obs, is_human=True)
+
+    def _append_game_result(self):
+        """Append game result summary to history when game ends."""
+        result_lines = [f"\n{'=' * 60}", "🏁 GAME OVER", f"{'=' * 60}"]
+        if self.rewards:
+            result_lines.append("\nFinal Results:")
+            for player_id, reward in sorted(self.rewards.items()):
+                status = (
+                    "🏆 Winner"
+                    if reward > 0
+                    else "❌ Loser"
+                    if reward < 0
+                    else "🤝 Draw"
+                )
+                result_lines.append(
+                    f"  Player {player_id}: {status} (reward: {reward})"
+                )
+        if self.game_info:
+            result_lines.append(f"\nGame Info: {self.game_info}")
+        self.full_history += "\n".join(result_lines)
 
     def get_state(self) -> GameStateResponse:
         return GameStateResponse(
@@ -98,6 +119,7 @@ class GameSession:
         self.done, _ = self.env.step(action=action)
         if self.done:
             self.rewards, self.game_info = self.env.close()
+            self._append_game_result()
         else:
             player_id, obs = self.env.get_observation()
             self.current_player_id = player_id
@@ -120,11 +142,13 @@ class GameSession:
 
             if self.done:
                 self.rewards, self.game_info = self.env.close()
+                self._append_game_result()
 
         return self.get_state()
 
 
 # Game Manager
+
 
 class GameManager:
     def __init__(self):
